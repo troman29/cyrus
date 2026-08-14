@@ -475,4 +475,40 @@ Check workspace isolation
 		expect(context).toContain("`[repo=org/ws1-app]`");
 		expect(context).toContain("`[repo=org/ws2-service]`");
 	});
+
+	it("skips repositories with no Linear workspace instead of throwing", () => {
+		// Regression: registerSlackEventTransport calls this on every startup, even with Slack
+		// unconfigured. requireLinearWorkspaceId() threw for GitHub-only repos, so a config the
+		// schema explicitly allows (linearWorkspaceId optional) could not start at all.
+		const githubOnly = {
+			id: "repo-github-only",
+			name: "GitHub Only",
+			repositoryPath: "/test/gh/only",
+			workspaceBaseDir: "/test/workspace",
+			baseBranch: "main",
+			githubUrl: "https://github.com/org/gh-only",
+		};
+
+		const linked = (suffix: string) => ({
+			id: `repo-linked-${suffix}`,
+			name: `Linked ${suffix}`,
+			repositoryPath: `/test/linked/${suffix}`,
+			workspaceBaseDir: "/test/workspace",
+			linearWorkspaceId: "workspace-linked",
+			baseBranch: "main",
+			githubUrl: `https://github.com/org/linked-${suffix}`,
+			labelPrompts: { orchestrator: { labels: ["Orchestrator"] } },
+		});
+
+		const worker = createTestWorker([githubOnly, linked("a"), linked("b")]);
+		const promptBuilder = (worker as any).promptBuilder as {
+			generateRoutingContextForAllWorkspaces: () => string;
+		};
+
+		const context = promptBuilder.generateRoutingContextForAllWorkspaces();
+
+		expect(context.match(/<repository_routing_context>/g)?.length || 0).toBe(1);
+		expect(context).toContain("Linked a");
+		expect(context).not.toContain("GitHub Only");
+	});
 });
