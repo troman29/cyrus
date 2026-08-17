@@ -364,9 +364,12 @@ export class RunnerConfigBuilder {
 			input.repository.model ||
 			this.runnerSelector.getDefaultModelForRunner(runnerType);
 
+		// GitHub/Slack-триггер на репозитории без Linear: воркспейса нет и быть не должно.
+		// Бросать тут нельзя — падает обработка вебхука уже ПОСЛЕ создания worktree, то есть
+		// сессия заводится и тут же умирает. Ниже по стеку пустой id обрабатывается штатно:
+		// buildMcpConfig не находит токен и уходит в ветку «CLI platform mode» без cyrus-tools.
 		const resolvedWorkspaceId =
-			input.linearWorkspaceId ??
-			input.requireLinearWorkspaceId(input.repository);
+			input.linearWorkspaceId ?? input.repository.linearWorkspaceId ?? "";
 		const mcpConfig = this.mcpConfigProvider.buildMcpConfig(
 			input.repository.id,
 			resolvedWorkspaceId,
