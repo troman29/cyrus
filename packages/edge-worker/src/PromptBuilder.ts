@@ -536,8 +536,14 @@ export class PromptBuilder {
 				continue;
 			}
 
-			// Keep a stable per-workspace bucket as we scan configured repositories.
-			const workspaceId = requireLinearWorkspaceId(repository);
+			// Repos without a Linear workspace (GitHub/Slack-only — the config schema calls
+			// linearWorkspaceId optional for exactly this) have no workspace to be routed within,
+			// so they belong in no bucket. Throwing here killed startup for every such repo:
+			// registerSlackEventTransport calls this unconditionally, even with Slack unconfigured.
+			const workspaceId = repository.linearWorkspaceId;
+			if (!workspaceId) {
+				continue;
+			}
 			const repositories = activeRepositoriesByWorkspace.get(workspaceId) ?? [];
 			repositories.push(repository);
 			activeRepositoriesByWorkspace.set(workspaceId, repositories);

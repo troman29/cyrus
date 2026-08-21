@@ -208,6 +208,16 @@ class HookOutputCollector {
 	}
 }
 
+/** `git` prefixed with `-c` pairs from `CYRUS_GIT_CONFIG` (space-separated `key=value`). */
+export function gitCommand(): string {
+	const config = process.env.CYRUS_GIT_CONFIG?.trim();
+	if (!config) return "git";
+	return `git ${config
+		.split(/\s+/)
+		.map((pair) => `-c "${pair}"`)
+		.join(" ")}`;
+}
+
 /**
  * Service responsible for Git worktree operations
  */
@@ -843,6 +853,7 @@ export class GitService {
 			}
 
 			// Create the worktree - use determined base branch
+			const git = gitCommand();
 			let worktreeCmd: string;
 			if (createBranch) {
 				if (hasRemote) {
@@ -877,7 +888,7 @@ export class GitService {
 						this.logger.info(
 							`Creating git worktree at ${workspacePath} from ${remoteBranch} (tracking ${baseBranch})`,
 						);
-						worktreeCmd = `git worktree add --track -b "${branchName}" "${workspacePath}" "${remoteBranch}"`;
+						worktreeCmd = `${git} worktree add --track -b "${branchName}" "${workspacePath}" "${remoteBranch}"`;
 					} else {
 						// Check if base branch exists locally
 						try {
@@ -889,14 +900,14 @@ export class GitService {
 							this.logger.info(
 								`Creating git worktree at ${workspacePath} from local ${baseBranch}`,
 							);
-							worktreeCmd = `git worktree add -b "${branchName}" "${workspacePath}" "${baseBranch}"`;
+							worktreeCmd = `${git} worktree add -b "${branchName}" "${workspacePath}" "${baseBranch}"`;
 						} catch {
 							// Base branch doesn't exist locally either, fall back to remote default with --track
 							this.logger.info(
 								`Base branch '${baseBranch}' not found locally, falling back to remote ${repository.baseBranch} (tracking ${repository.baseBranch})`,
 							);
 							const defaultRemoteBranch = `origin/${repository.baseBranch}`;
-							worktreeCmd = `git worktree add --track -b "${branchName}" "${workspacePath}" "${defaultRemoteBranch}"`;
+							worktreeCmd = `${git} worktree add --track -b "${branchName}" "${workspacePath}" "${defaultRemoteBranch}"`;
 						}
 					}
 				} else {
@@ -904,14 +915,14 @@ export class GitService {
 					this.logger.info(
 						`Creating git worktree at ${workspacePath} from local ${baseBranch}`,
 					);
-					worktreeCmd = `git worktree add -b "${branchName}" "${workspacePath}" "${baseBranch}"`;
+					worktreeCmd = `${git} worktree add -b "${branchName}" "${workspacePath}" "${baseBranch}"`;
 				}
 			} else {
 				// Branch already exists, just check it out
 				this.logger.info(
 					`Creating git worktree at ${workspacePath} with existing branch ${branchName}`,
 				);
-				worktreeCmd = `git worktree add "${workspacePath}" "${branchName}"`;
+				worktreeCmd = `${git} worktree add "${workspacePath}" "${branchName}"`;
 			}
 
 			execSync(worktreeCmd, {

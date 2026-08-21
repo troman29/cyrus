@@ -364,9 +364,9 @@ export class RunnerConfigBuilder {
 			input.repository.model ||
 			this.runnerSelector.getDefaultModelForRunner(runnerType);
 
+		// Empty for repos without Linear: buildMcpConfig then falls through to CLI platform mode.
 		const resolvedWorkspaceId =
-			input.linearWorkspaceId ??
-			input.requireLinearWorkspaceId(input.repository);
+			input.linearWorkspaceId ?? input.repository.linearWorkspaceId ?? "";
 		const mcpConfig = this.mcpConfigProvider.buildMcpConfig(
 			input.repository.id,
 			resolvedWorkspaceId,
