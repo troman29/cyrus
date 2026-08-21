@@ -1,13 +1,5 @@
-// Регрессия: GitHub-триггер на репозитории без Linear.
-//
-// buildIssueConfig звал requireLinearWorkspaceId, который бросает. Ломалось это не на старте,
-// а в середине обработки вебхука — worktree уже создан, сессия уже заведена, и тут исключение:
-//
-//   Failed to process GitHub webhook Error: Repository "agentek-console" is not linked to a
-//   Linear workspace ... at RunnerConfigBuilder.buildIssueConfig
-//
-// Пустой workspace id ниже по стеку обрабатывается штатно: токена для него нет, и buildMcpConfig
-// уходит в ветку «CLI platform mode» без cyrus-tools.
+// Regression: buildIssueConfig threw for repos without Linear, mid-webhook — after the worktree
+// was created and the session registered.
 import type { CyrusAgentSession, ILogger, RepositoryConfig } from "cyrus-core";
 import { describe, expect, it } from "vitest";
 import {
@@ -65,7 +57,6 @@ function buildFor(repository: RepositoryConfig, linearWorkspaceId?: string) {
 		logger: silentLogger,
 		onMessage: () => {},
 		onError: () => {},
-		// Осталось в контракте ради Linear-путей; для GitHub-репозитория звать его нельзя.
 		requireLinearWorkspaceId: () => {
 			throw new Error("Repository is not linked to a Linear workspace");
 		},
@@ -81,15 +72,15 @@ const githubOnlyRepo = {
 	allowedTools: [],
 } as unknown as RepositoryConfig;
 
-describe("RunnerConfigBuilder без Linear-воркспейса", () => {
-	it("не бросает для GitHub-репозитория и отдаёт пустой workspace id", () => {
+describe("RunnerConfigBuilder without a Linear workspace", () => {
+	it("does not throw for a GitHub-only repo and passes an empty workspace id", () => {
 		const { result, seen } = buildFor(githubOnlyRepo);
 
 		expect(result.config.workingDirectory).toBe("/ws/root");
 		expect(seen).toEqual([""]);
 	});
 
-	it("использует linearWorkspaceId репозитория, когда он есть", () => {
+	it("uses the repository linearWorkspaceId when present", () => {
 		const linked = {
 			...githubOnlyRepo,
 			linearWorkspaceId: "ws-from-repo",
@@ -98,7 +89,7 @@ describe("RunnerConfigBuilder без Linear-воркспейса", () => {
 		expect(buildFor(linked).seen).toEqual(["ws-from-repo"]);
 	});
 
-	it("явный аргумент важнее значения из репозитория", () => {
+	it("prefers the explicit argument over the repository value", () => {
 		const linked = {
 			...githubOnlyRepo,
 			linearWorkspaceId: "ws-from-repo",
