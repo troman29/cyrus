@@ -208,13 +208,7 @@ class HookOutputCollector {
 	}
 }
 
-/**
- * `git` prefixed with config from `CYRUS_GIT_CONFIG` (space-separated `key=value` pairs).
- *
- * Repos whose checkout needs local state a fresh worktree lacks can pass it here, e.g.
- * `CYRUS_GIT_CONFIG="filter.git-crypt.smudge=cat filter.git-crypt.clean=cat"` keeps a
- * git-crypt repo checking out (as ciphertext) instead of failing the smudge filter.
- */
+/** `git` prefixed with `-c` pairs from `CYRUS_GIT_CONFIG` (space-separated `key=value`). */
 export function gitCommand(): string {
 	const config = process.env.CYRUS_GIT_CONFIG?.trim();
 	if (!config) return "git";
