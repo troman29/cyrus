@@ -23,6 +23,7 @@ export {
 	extractPRBranchRef,
 	extractPRNumber,
 	extractPRTitle,
+	extractPullRequestAuthor,
 	extractRepoFullName,
 	extractRepoName,
 	extractRepoOwner,
@@ -31,6 +32,7 @@ export {
 	isIssueCommentPayload,
 	isPullRequestReviewCommentPayload,
 	isPullRequestReviewPayload,
+	isSameGitHubLogin,
 	stripMention,
 } from "./github-webhook-utils.js";
 export type {

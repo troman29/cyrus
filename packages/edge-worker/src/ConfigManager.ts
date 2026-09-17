@@ -258,6 +258,10 @@ export class ConfigManager extends EventEmitter {
 				// otherwise keep current or default to true
 				prReviewTrigger:
 					parsedConfig.prReviewTrigger ?? this.config.prReviewTrigger,
+				// PR review trigger scope: only the bot's own pull requests, or every one
+				prReviewOwnPullRequestsOnly:
+					parsedConfig.prReviewOwnPullRequestsOnly ??
+					this.config.prReviewOwnPullRequestsOnly,
 				// Sandbox / egress proxy config
 				sandbox: parsedConfig.sandbox ?? this.config.sandbox,
 			};
@@ -357,6 +361,7 @@ export class ConfigManager extends EventEmitter {
 			"issueUpdateTrigger",
 			"slackThreadFollowing",
 			"prReviewTrigger",
+			"prReviewOwnPullRequestsOnly",
 			"linearWorkspaces",
 			"userAccessControl",
 			"sandbox",

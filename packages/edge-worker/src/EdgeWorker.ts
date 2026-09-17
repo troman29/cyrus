@@ -88,6 +88,7 @@ import {
 	extractPRBranchRef,
 	extractPRNumber,
 	extractPRTitle,
+	extractPullRequestAuthor,
 	extractRepoFullName,
 	extractRepoName,
 	extractRepoOwner,
@@ -102,6 +103,7 @@ import {
 	isIssueCommentPayload,
 	isPullRequestReviewCommentPayload,
 	isPullRequestReviewPayload,
+	isSameGitHubLogin,
 	stripMention,
 } from "cyrus-github-event-transport";
 import type { GitLabWebhookEvent } from "cyrus-gitlab-event-transport";
@@ -1253,6 +1255,20 @@ export class EdgeWorker extends EventEmitter {
 					`PR review trigger is disabled, ignoring pull_request_review on ${repoFullName}#${prNumber}`,
 				);
 				return;
+			}
+
+			// Reviews carry no @mention, so without this gate a review on ANY pull
+			// request — including one human reviewing another human's work — starts a
+			// session nobody asked for. Unknown author counts as "not ours": silence
+			// is the safe side of a trigger that cannot be addressed explicitly.
+			if (isPullRequestReview && this.config.prReviewOwnPullRequestsOnly) {
+				const prAuthor = extractPullRequestAuthor(event);
+				if (!isSameGitHubLogin(prAuthor, botUsername)) {
+					this.logger.debug(
+						`PR review trigger is limited to @${botUsername}'s own pull requests, ignoring review on ${repoFullName}#${prNumber} authored by @${prAuthor ?? "unknown"}`,
+					);
+					return;
+				}
 			}
 
 			// Only trigger on comments that mention the bot (when configured)

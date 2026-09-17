@@ -127,6 +127,44 @@ export function extractCommentAuthor(event: GitHubCommentWebhookEvent): string {
 }
 
 /**
+ * Extract the pull request author from a GitHub webhook event.
+ *
+ * Only review payloads carry the pull request object; `issue_comment` does not,
+ * so the caller gets `null` and must decide (or fetch it from the API).
+ */
+export function extractPullRequestAuthor(
+	event: GitHubCommentWebhookEvent,
+): string | null {
+	if (isPullRequestReviewPayload(event.payload)) {
+		return event.payload.pull_request.user?.login ?? null;
+	}
+	if (isPullRequestReviewCommentPayload(event.payload)) {
+		return event.payload.pull_request.user?.login ?? null;
+	}
+	return null;
+}
+
+/**
+ * Compare GitHub logins ignoring the `[bot]` suffix.
+ *
+ * A GitHub App authors pull requests as `name[bot]` while the configured
+ * `GITHUB_BOT_USERNAME` is usually written without the suffix — comparing the
+ * raw strings would never match.
+ */
+export function isSameGitHubLogin(
+	one: string | null | undefined,
+	other: string | null | undefined,
+): boolean {
+	const strip = (login: string | null | undefined): string =>
+		(login ?? "")
+			.trim()
+			.toLowerCase()
+			.replace(/\[bot\]$/, "");
+	const left = strip(one);
+	return left.length > 0 && left === strip(other);
+}
+
+/**
  * Extract repository full name (owner/repo) from a GitHub webhook event
  */
 export function extractRepoFullName(event: GitHubWebhookEvent): string {

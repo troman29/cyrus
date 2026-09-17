@@ -603,6 +603,9 @@
 		"prReviewTrigger": {
 			"type": "boolean"
 		},
+		"prReviewOwnPullRequestsOnly": {
+			"type": "boolean"
+		},
 		"userAccessControl": {
 			"type": "object",
 			"properties": {

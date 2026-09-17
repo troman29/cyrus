@@ -237,6 +237,7 @@ export class WorkerService {
 					| undefined) || edgeConfig.defaultRunner,
 			issueUpdateTrigger: edgeConfig.issueUpdateTrigger,
 			prReviewTrigger: edgeConfig.prReviewTrigger,
+			prReviewOwnPullRequestsOnly: edgeConfig.prReviewOwnPullRequestsOnly,
 			promptDefaults: edgeConfig.promptDefaults,
 			linearWorkspaces: edgeConfig.linearWorkspaces,
 			webhookBaseUrl: process.env.CYRUS_BASE_URL,

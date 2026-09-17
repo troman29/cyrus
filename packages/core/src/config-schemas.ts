@@ -475,6 +475,15 @@ export const EdgeConfigSchema = z.object({
 	prReviewTrigger: z.boolean().optional(),
 
 	/**
+	 * Whether the pull request review trigger fires only on pull requests the bot
+	 * itself opened. A review never @mentions anyone, so with this off any review
+	 * requesting changes — including one a human leaves on another human's pull
+	 * request — starts an agent session nobody asked for. Defaults to false
+	 * (react to every pull request) if not specified.
+	 */
+	prReviewOwnPullRequestsOnly: z.boolean().optional(),
+
+	/**
 	 * Global user access control settings.
 	 * Applied to all repositories unless overridden.
 	 */
