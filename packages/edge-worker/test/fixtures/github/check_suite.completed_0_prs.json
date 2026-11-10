@@ -1,0 +1,38 @@
+{
+	"action": "completed",
+	"check_suite": {
+		"id": 4242,
+		"head_branch": "feat/x",
+		"head_sha": "abc1234def5678",
+		"status": "completed",
+		"conclusion": "failure",
+		"updated_at": "2026-11-11T04:00:00Z",
+		"app": {
+			"slug": "github-actions"
+		},
+		"pull_requests": []
+	},
+	"repository": {
+		"id": 1,
+		"name": "agentek-console",
+		"full_name": "windbit/agentek-console",
+		"html_url": "https://github.com/windbit/agentek-console",
+		"clone_url": "https://github.com/windbit/agentek-console.git",
+		"ssh_url": "git@github.com:windbit/agentek-console.git",
+		"default_branch": "dev",
+		"owner": {
+			"login": "windbit",
+			"id": 9,
+			"avatar_url": "https://avatars.githubusercontent.com/u/9",
+			"html_url": "https://github.com/windbit",
+			"type": "Organization"
+		}
+	},
+	"sender": {
+		"login": "github-actions[bot]",
+		"id": 41898282,
+		"avatar_url": "https://avatars.githubusercontent.com/u/41898282",
+		"html_url": "https://github.com/github-actions[bot]",
+		"type": "Bot"
+	}
+}

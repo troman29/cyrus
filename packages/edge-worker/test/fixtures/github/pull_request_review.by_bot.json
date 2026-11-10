@@ -1,0 +1,105 @@
+{
+	"action": "submitted",
+	"review": {
+		"id": 556,
+		"node_id": "x",
+		"body": null,
+		"state": "approved",
+		"html_url": "https://github.com/windbit/agentek-console/pull/1687#pullrequestreview-556",
+		"user": {
+			"login": "thomas5788",
+			"id": 5788,
+			"avatar_url": "https://avatars.githubusercontent.com/u/5788",
+			"html_url": "https://github.com/thomas5788",
+			"type": "User"
+		},
+		"submitted_at": "2026-11-11T01:00:00Z",
+		"commit_id": "abc1234def5678",
+		"author_association": "MEMBER"
+	},
+	"pull_request": {
+		"id": 100,
+		"number": 1687,
+		"title": "feat: shepherd",
+		"body": "body",
+		"state": "open",
+		"html_url": "https://github.com/windbit/agentek-console/pull/1687",
+		"url": "https://api.github.com/repos/windbit/agentek-console/pulls/1687",
+		"head": {
+			"label": "windbit:feat/x",
+			"ref": "feat/x",
+			"sha": "abc1234def5678",
+			"repo": {
+				"id": 1,
+				"name": "agentek-console",
+				"full_name": "windbit/agentek-console",
+				"html_url": "https://github.com/windbit/agentek-console",
+				"clone_url": "https://github.com/windbit/agentek-console.git",
+				"ssh_url": "git@github.com:windbit/agentek-console.git",
+				"default_branch": "dev",
+				"owner": {
+					"login": "windbit",
+					"id": 9,
+					"avatar_url": "https://avatars.githubusercontent.com/u/9",
+					"html_url": "https://github.com/windbit",
+					"type": "Organization"
+				}
+			}
+		},
+		"base": {
+			"label": "windbit:dev",
+			"ref": "dev",
+			"sha": "0000000",
+			"repo": {
+				"id": 1,
+				"name": "agentek-console",
+				"full_name": "windbit/agentek-console",
+				"html_url": "https://github.com/windbit/agentek-console",
+				"clone_url": "https://github.com/windbit/agentek-console.git",
+				"ssh_url": "git@github.com:windbit/agentek-console.git",
+				"default_branch": "dev",
+				"owner": {
+					"login": "windbit",
+					"id": 9,
+					"avatar_url": "https://avatars.githubusercontent.com/u/9",
+					"html_url": "https://github.com/windbit",
+					"type": "Organization"
+				}
+			}
+		},
+		"user": {
+			"login": "thomas5788",
+			"id": 5788,
+			"avatar_url": "https://avatars.githubusercontent.com/u/5788",
+			"html_url": "https://github.com/thomas5788",
+			"type": "User"
+		},
+		"draft": false,
+		"merged": false,
+		"merged_by": null,
+		"updated_at": "2026-11-11T00:00:00Z"
+	},
+	"repository": {
+		"id": 1,
+		"name": "agentek-console",
+		"full_name": "windbit/agentek-console",
+		"html_url": "https://github.com/windbit/agentek-console",
+		"clone_url": "https://github.com/windbit/agentek-console.git",
+		"ssh_url": "git@github.com:windbit/agentek-console.git",
+		"default_branch": "dev",
+		"owner": {
+			"login": "windbit",
+			"id": 9,
+			"avatar_url": "https://avatars.githubusercontent.com/u/9",
+			"html_url": "https://github.com/windbit",
+			"type": "Organization"
+		}
+	},
+	"sender": {
+		"login": "thomas5788",
+		"id": 5788,
+		"avatar_url": "https://avatars.githubusercontent.com/u/5788",
+		"html_url": "https://github.com/thomas5788",
+		"type": "User"
+	}
+}
