@@ -177,6 +177,12 @@ import {
 	SkillsPluginResolver,
 } from "./SkillsPluginResolver.js";
 import { SlackChatAdapter } from "./SlackChatAdapter.js";
+import {
+	createGithubPrLookup,
+	EventRouter,
+	isShepherdEnabled,
+	loadShepherdConfig,
+} from "./shepherd/index.js";
 import type { IActivitySink } from "./sinks/IActivitySink.js";
 import { LinearActivitySink } from "./sinks/LinearActivitySink.js";
 import { ToolPermissionResolver } from "./ToolPermissionResolver.js";
@@ -916,7 +922,22 @@ export class EdgeWorker extends EventEmitter {
 			? process.env.GITHUB_WEBHOOK_SECRET!
 			: process.env.CYRUS_API_KEY || "";
 
+		// PR shepherd: forward events to the hub instead of running sessions
+		const shepherd = isShepherdEnabled(process.env)
+			? new EventRouter({
+					config: loadShepherdConfig(process.env),
+					lookupPr: createGithubPrLookup(async () =>
+						this.gitHubAppTokenProvider
+							? this.gitHubAppTokenProvider.getToken()
+							: process.env.GITHUB_TOKEN,
+					),
+				})
+			: undefined;
+
 		this.gitHubEventTransport = new GitHubEventTransport({
+			eventHandler: shepherd
+				? (event: GitHubWebhookEvent) => shepherd.handle(event)
+				: undefined,
 			fastifyServer: this.sharedApplicationServer.getFastifyInstance(),
 			verificationMode,
 			secret,
