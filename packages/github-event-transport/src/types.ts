@@ -24,6 +24,13 @@ export interface GitHubEventTransportConfig {
 	secret: string;
 	/** Optional IP allowlist for webhook source validation (only used in signature mode) */
 	ipAllowlist?: readonly string[];
+	/**
+	 * PR shepherd hook. When set, the transport additionally accepts
+	 * `pull_request` and `check_suite`, awaits this handler and answers
+	 * 200 if it resolves `true`, 503 if it resolves `false` or throws.
+	 * The legacy "event"/"message" emitters are skipped in that mode.
+	 */
+	eventHandler?: (event: GitHubWebhookEvent) => Promise<boolean>;
 }
 
 /**
@@ -51,7 +58,9 @@ export interface GitHubWebhookEvent {
 		| GitHubIssueCommentPayload
 		| GitHubPullRequestReviewCommentPayload
 		| GitHubPullRequestReviewPayload
-		| GitHubPushPayload;
+		| GitHubPushPayload
+		| GitHubPullRequestPayload
+		| GitHubCheckSuitePayload;
 	/** GitHub installation token forwarded from CYHOST (1-hour expiry) */
 	installationToken?: string;
 }
@@ -63,12 +72,17 @@ export type GitHubEventType =
 	| "issue_comment"
 	| "pull_request_review_comment"
 	| "pull_request_review"
-	| "push";
+	| "push"
+	| "pull_request"
+	| "check_suite";
 
 /**
- * Comment-related GitHub event types (excludes push)
+ * Comment-related GitHub event types (excludes push and shepherd-only events)
  */
-export type GitHubCommentEventType = Exclude<GitHubEventType, "push">;
+export type GitHubCommentEventType =
+	| "issue_comment"
+	| "pull_request_review_comment"
+	| "pull_request_review";
 
 /**
  * Comment/review webhook event (excludes push events).
@@ -150,6 +164,10 @@ export interface GitHubPullRequest {
 	head: GitHubPullRequestRef;
 	base: GitHubPullRequestRef;
 	user: GitHubUser;
+	draft?: boolean;
+	merged?: boolean;
+	merged_by?: GitHubUser | null;
+	updated_at?: string;
 }
 
 /**
@@ -179,8 +197,11 @@ export interface GitHubComment {
 	user: GitHubUser;
 	created_at: string;
 	updated_at: string;
+	author_association?: string;
 	/** For PR review comments: the file path being commented on */
 	path?: string;
+	/** For PR review comments: the line in the file (null when outdated) */
+	line?: number | null;
 	/** For PR review comments: the diff hunk */
 	diff_hunk?: string;
 	/** For PR review comments: the commit being commented on */
@@ -233,6 +254,7 @@ export interface GitHubReview {
 	user: GitHubUser;
 	submitted_at: string;
 	commit_id: string;
+	author_association?: string;
 }
 
 /**
@@ -281,6 +303,59 @@ export interface GitHubPushPayload {
 	head_commit: GitHubPushCommit | null;
 	repository: GitHubRepository;
 	pusher: { name: string; email: string };
+	sender: GitHubUser;
+	installation?: GitHubInstallation;
+}
+
+/**
+ * Payload for pull_request webhook events
+ * @see https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request
+ */
+export interface GitHubPullRequestPayload {
+	action:
+		| "opened"
+		| "reopened"
+		| "ready_for_review"
+		| "synchronize"
+		| "closed"
+		| "edited"
+		| "labeled"
+		| "converted_to_draft";
+	number: number;
+	pull_request: GitHubPullRequest;
+	repository: GitHubRepository;
+	sender: GitHubUser;
+	installation?: GitHubInstallation;
+}
+
+/**
+ * PR reference inside check_suite.pull_requests[] (no title/author there)
+ */
+export interface GitHubCheckSuitePullRequest {
+	id: number;
+	number: number;
+	url: string;
+	head: { ref: string; sha: string };
+	base: { ref: string; sha: string };
+}
+
+/**
+ * Payload for check_suite webhook events
+ * @see https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_suite
+ */
+export interface GitHubCheckSuitePayload {
+	action: "completed" | "requested" | "rerequested";
+	check_suite: {
+		id: number;
+		head_branch: string | null;
+		head_sha: string;
+		status: string | null;
+		conclusion: string | null;
+		updated_at: string;
+		app: { slug: string };
+		pull_requests: GitHubCheckSuitePullRequest[];
+	};
+	repository: GitHubRepository;
 	sender: GitHubUser;
 	installation?: GitHubInstallation;
 }

@@ -25,7 +25,9 @@ export function isIssueCommentPayload(
 export function isPullRequestReviewCommentPayload(
 	payload: GitHubWebhookEvent["payload"],
 ): payload is GitHubPullRequestReviewCommentPayload {
-	return "pull_request" in payload && !("review" in payload);
+	return (
+		"pull_request" in payload && "comment" in payload && !("review" in payload)
+	);
 }
 
 /**

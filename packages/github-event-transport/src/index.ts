@@ -36,6 +36,8 @@ export {
 	stripMention,
 } from "./github-webhook-utils.js";
 export type {
+	GitHubCheckSuitePayload,
+	GitHubCheckSuitePullRequest,
 	GitHubComment,
 	GitHubCommentEventType,
 	GitHubCommentWebhookEvent,
@@ -47,6 +49,7 @@ export type {
 	GitHubIssueCommentPayload,
 	GitHubPullRequest,
 	GitHubPullRequestMinimal,
+	GitHubPullRequestPayload,
 	GitHubPullRequestRef,
 	GitHubPullRequestReviewCommentPayload,
 	GitHubPullRequestReviewPayload,
