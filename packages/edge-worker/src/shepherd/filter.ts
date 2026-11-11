@@ -2,6 +2,7 @@ import type { GitHubWebhookEvent } from "cyrus-github-event-transport";
 import type { ShepherdConfig, ShepherdEvent } from "./types.js";
 
 export type DropReason =
+	| "account_not_allowed"
 	| "repo_not_allowed"
 	| "not_pr"
 	| "event_not_supported"
@@ -25,6 +26,10 @@ export function rawDropReason(
 		sender: { login: string; type: string };
 		issue?: { pull_request?: unknown };
 	};
+	const owner = payload.repository.full_name.split("/")[0]?.toLowerCase() ?? "";
+	if (config.accounts && !config.accounts.has(owner)) {
+		return "account_not_allowed";
+	}
 	if (
 		config.repos &&
 		!config.repos.some((glob) => glob.test(payload.repository.full_name))
