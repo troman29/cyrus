@@ -95,9 +95,7 @@ describe("trusted Cyrus release workflow", () => {
 		expect(workflow).toContain(
 			'ACTUAL_VERSION="$(CYRUS_SENTRY_DISABLED=1 cyrus --version)"',
 		);
-		expect(workflow).toContain(
-			'npm publish "$tarball" --access public --tag "$DIST_TAG"',
-		);
+		expect(workflow).toContain("run: node scripts/publish-release.mjs");
 	});
 
 	it("publishes every public package in dependency order", () => {
@@ -144,23 +142,22 @@ describe("trusted Cyrus release workflow", () => {
 		}
 	});
 
-	it("recovers safely from partially published npm releases", () => {
-		expect(workflow).toContain("verify_registry_version() {");
-		expect(workflow).toContain("tarball_integrity() {");
-		expect(workflow).toContain("for attempt in {1..12}; do");
-		expect(workflow).toContain("dist.integrity");
-		expect(workflow).toContain('createHash("sha512")');
+	it("preflights package existence before any release work or publishing", () => {
+		expect(workflow).toContain("missing_packages=()");
 		expect(workflow).toContain(
-			`Skipping immutable \${package_name}@\${REQUESTED_VERSION}; verifying npm tag \${DIST_TAG}.`,
+			'npm view "$package_name" version >/dev/null 2>&1',
 		);
 		expect(workflow).toContain(
-			`\${package_name}@\${REQUESTED_VERSION} does not match the artifact packed by this run; refusing a mixed-commit release.`,
+			"Every release package must already exist on npm before this workflow runs.",
 		);
 		expect(workflow).toContain(
-			`Dry run would publish \${package_name}@\${REQUESTED_VERSION} with npm tag \${DIST_TAG}.`,
+			"npm trust github <package> --repo cyrusagents/cyrus --file release-cli.yml --allow-publish --yes",
 		);
-		expect(workflow).toContain(
-			`\${package_name}@\${REQUESTED_VERSION} is not consistently visible with npm tag \${DIST_TAG}.`,
+		expect(workflow.indexOf("missing_packages=()")).toBeLessThan(
+			workflow.indexOf("Install locked dependencies"),
+		);
+		expect(workflow.indexOf("missing_packages=()")).toBeLessThan(
+			workflow.indexOf("run: node scripts/publish-release.mjs"),
 		);
 	});
 
