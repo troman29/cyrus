@@ -4,12 +4,12 @@ import type { PrLookup } from "./types.js";
 export function createGithubPrLookup(
 	getToken: () => Promise<string | undefined>,
 ): PrLookup {
-	return async (repo, pr) => {
+	return async (repo, pr, installationToken) => {
 		const headers: Record<string, string> = {
 			Accept: "application/vnd.github+json",
 			"X-GitHub-Api-Version": "2022-11-28",
 		};
-		const token = await getToken();
+		const token = installationToken ?? (await getToken());
 		if (token) {
 			headers.Authorization = `Bearer ${token}`;
 		}

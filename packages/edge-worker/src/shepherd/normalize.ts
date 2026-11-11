@@ -108,7 +108,7 @@ export async function normalize(
 		case "issue_comment": {
 			const { issue, comment } = payload as GitHubIssueCommentPayload;
 			// The payload has no head/base of the PR; fetch them with title and author.
-			const meta = await lookupPr(repo, issue.number);
+			const meta = await lookupPr(repo, issue.number, event.installationToken);
 			return [
 				{
 					repo,
@@ -133,7 +133,7 @@ export async function normalize(
 			const { check_suite: suite } = payload as GitHubCheckSuitePayload;
 			return Promise.all(
 				suite.pull_requests.map(async (pr) => {
-					const meta = await lookupPr(repo, pr.number);
+					const meta = await lookupPr(repo, pr.number, event.installationToken);
 					return {
 						repo,
 						pr: pr.number,

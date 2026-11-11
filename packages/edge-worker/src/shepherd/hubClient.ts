@@ -15,7 +15,7 @@ export interface HubRequest {
 /**
  * One NDJSON round trip over shepherd.sock. Resolves with the hub ACK;
  * rejects on connect error, timeout, malformed reply or `ok:false`.
- * No retries: GitHub redelivery is the retry.
+ * No retries here: the retry is a GitHub redelivery, which needs an external job.
  */
 export function sendToHub(request: HubRequest): Promise<HubAck> {
 	const { socketPath, deliveryId, event, timeoutMs = HUB_TIMEOUT_MS } = request;

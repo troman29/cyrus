@@ -66,7 +66,12 @@ export interface PrMeta {
 	baseRef: string;
 }
 
-export type PrLookup = (repo: string, pr: number) => Promise<PrMeta>;
+/** installationToken is the one forwarded with the webhook, if any. */
+export type PrLookup = (
+	repo: string,
+	pr: number,
+	installationToken?: string,
+) => Promise<PrMeta>;
 
 export interface ShepherdConfig {
 	socketPath: string;
