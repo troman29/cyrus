@@ -2,6 +2,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { validateReleaseEvidence } from "./release-evidence.mjs";
+
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export const repositoryUrl = "git+https://github.com/cyrusagents/cyrus.git";
@@ -34,9 +36,18 @@ export const releasePackages = [
 		name: "cyrus-slack-event-transport",
 	},
 	{
+		directory: "packages/zulip-event-transport",
+		name: "cyrus-zulip-event-transport",
+	},
+	{
+		directory: "packages/plane-event-transport",
+		name: "cyrus-plane-event-transport",
+	},
+	{
 		directory: "packages/simple-agent-runner",
 		name: "cyrus-simple-agent-runner",
 	},
+	{ directory: "packages/opencode-runner", name: "cyrus-opencode-runner" },
 	{ directory: "packages/codex-runner", name: "cyrus-codex-runner" },
 	{ directory: "packages/cursor-runner", name: "cyrus-cursor-runner" },
 	{ directory: "packages/gemini-runner", name: "cyrus-gemini-runner" },
@@ -170,15 +181,7 @@ export function validateRelease(version) {
 		);
 	}
 
-	const releaseDriveSuffix = `-release-v${version}.md`;
-	const hasReleaseDrive = readdirSync(
-		join(repositoryRoot, "apps/f1/test-drives"),
-	).some((file) => file.endsWith(releaseDriveSuffix));
-	if (!hasReleaseDrive) {
-		throw new Error(
-			`apps/f1/test-drives is missing an F1 release test drive ending in ${releaseDriveSuffix}.`,
-		);
-	}
+	validateReleaseEvidence(version, repositoryRoot);
 
 	return { section };
 }

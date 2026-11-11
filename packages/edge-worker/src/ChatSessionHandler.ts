@@ -7,7 +7,9 @@ import type {
 	CyrusAgentSession,
 	IAgentRunner,
 	ILogger,
+	OpenCodeConfigOverrides,
 	RepositoryConfig,
+	RunnerType,
 } from "cyrus-core";
 import { createLogger } from "cyrus-core";
 import { AgentSessionManager } from "./AgentSessionManager.js";
@@ -21,7 +23,18 @@ import type { RunnerConfigBuilder } from "./RunnerConfigBuilder.js";
  * events into the common operations the ChatSessionHandler needs.
  */
 /** Platform identifiers supported by the session manager */
-export type ChatPlatformName = "slack" | "linear" | "github";
+export type ChatPlatformName = "slack" | "linear" | "github" | "zulip";
+
+/** Outcome of an adapter's access check for an inbound event. */
+export type ChatAccessDecision =
+	| { allowed: true }
+	| {
+			allowed: false;
+			/** Why the user was denied, for logs */
+			reason: string;
+			/** Notice to post back to the thread; omitted to deny silently */
+			reply?: string;
+	  };
 
 export interface ChatPlatformAdapter<TEvent> {
 	readonly platformName: ChatPlatformName;
@@ -39,6 +52,21 @@ export interface ChatPlatformAdapter<TEvent> {
 	 * (the behaviour for platforms where every event is an explicit invocation).
 	 */
 	isSessionInitiatingEvent?(event: TEvent): boolean;
+
+	/**
+	 * Whether the user behind this event may prompt the agent. Runs before
+	 * anything visible happens, so a denied event leaves no trace unless the
+	 * decision carries a `reply`, which is posted through `notifyBlocked`.
+	 *
+	 * Optional — when omitted, every event is allowed.
+	 */
+	checkAccess?(event: TEvent): ChatAccessDecision;
+
+	/**
+	 * Post the `reply` of a denying `checkAccess` decision to the thread.
+	 * Required for adapters whose `checkAccess` can return a reply.
+	 */
+	notifyBlocked?(event: TEvent, reply: string): Promise<void>;
 
 	/** Derive a unique thread key for session tracking (e.g., "C123:1704110400.000100") */
 	getThreadKey(event: TEvent): string;
@@ -92,8 +120,11 @@ export interface ChatSessionHandlerDeps {
 	chatRepositoryProvider: ChatRepositoryProvider;
 	/** Shared RunnerConfigBuilder for constructing runner configs */
 	runnerConfigBuilder: RunnerConfigBuilder;
-	/** Factory function that creates the appropriate runner based on config.defaultRunner */
-	createRunner: (config: AgentRunnerConfig) => IAgentRunner;
+	/** Factory function that creates the appropriate runner for the chat session */
+	createRunner: (
+		config: AgentRunnerConfig,
+		runnerType?: RunnerType,
+	) => IAgentRunner;
 	/**
 	 * Live read of the workspace-level custom-integration MCP config paths
 	 * for the chat platform this handler is bound to (e.g.
@@ -103,11 +134,25 @@ export interface ChatSessionHandlerDeps {
 	 * no custom files load (native MCP servers still run as usual).
 	 */
 	getPlatformMcpConfigOverrides?: () => readonly string[] | undefined;
+	/** Live read of whether Claude should ignore ambient MCP configuration. */
+	getStrictMcpConfig?: () => boolean | undefined;
+	/**
+	 * Refresh the workspace's Linear access token if it has expired. Called
+	 * before each runner config is built, because the Linear MCP server
+	 * receives the token as a fixed header and cannot refresh it itself.
+	 */
+	ensureLinearTokenFresh?: (linearWorkspaceId: string) => Promise<void>;
 	/** Resolve managed skill plugins and scoped skill names for a chat session. */
 	resolveSkillsConfig?: (input: {
 		repository?: RepositoryConfig;
 		repositoryPaths: string[];
 	}) => Promise<{ plugins?: SdkPluginConfig[]; skills?: string[] | "all" }>;
+	/** Read live global OpenCode config overrides at session-build time */
+	getOpenCodeGlobalConfig?: () => OpenCodeConfigOverrides["config"] | undefined;
+	/** Read live global OpenCode CLI state scope at session-build time */
+	getOpenCodeGlobalStateScope?: () =>
+		| OpenCodeConfigOverrides["stateScope"]
+		| undefined;
 	onWebhookStart: () => void;
 	onWebhookEnd: () => void;
 	onStateChange: () => Promise<void>;
@@ -181,6 +226,38 @@ export class ChatSessionHandler<TEvent> {
 				`Processing ${this.adapter.platformName} webhook: ${this.adapter.getEventId(event)}`,
 			);
 
+			const threadKey = this.adapter.getThreadKey(event);
+			const existingSessionId = this.threadSessions.get(threadKey);
+
+			// Only events explicitly allowed to start a session may do so for an
+			// unbound thread — e.g. a Slack @mention. A plain follow-up message in
+			// an unbound thread must be ignored, otherwise every message in any
+			// channel Cyrus can see would spin up a session. Decided before the
+			// receipt acknowledgement so an ignored message leaves no trace.
+			if (
+				!existingSessionId &&
+				this.adapter.isSessionInitiatingEvent?.(event) === false
+			) {
+				this.logger.info(
+					`Ignoring non-initiating ${this.adapter.platformName} event for unbound thread ${threadKey}`,
+				);
+				return;
+			}
+
+			// Access control also runs before the acknowledgement: a user who may
+			// not prompt the agent gets silence or the configured notice, never a
+			// receipt reaction.
+			const access = this.adapter.checkAccess?.(event) ?? { allowed: true };
+			if (!access.allowed) {
+				this.logger.info(
+					`Dropping ${this.adapter.platformName} event ${this.adapter.getEventId(event)} for thread ${threadKey}: ${access.reason}`,
+				);
+				if (access.reply !== undefined) {
+					await this.notifyBlocked(event, access.reply);
+				}
+				return;
+			}
+
 			// Fire-and-forget acknowledgement (e.g., emoji reaction)
 			this.adapter.acknowledgeReceipt(event).catch((err: unknown) => {
 				this.logger.warn(
@@ -189,10 +266,8 @@ export class ChatSessionHandler<TEvent> {
 			});
 
 			const taskInstructions = this.adapter.extractTaskInstructions(event);
-			const threadKey = this.adapter.getThreadKey(event);
 
 			// Check if there's already an active session for this thread
-			const existingSessionId = this.threadSessions.get(threadKey);
 			if (existingSessionId) {
 				const existingSession =
 					this.sessionManager.getSession(existingSessionId);
@@ -235,19 +310,16 @@ export class ChatSessionHandler<TEvent> {
 						`Resuming completed ${this.adapter.platformName} session ${existingSessionId} (thread ${threadKey})`,
 					);
 
-					const resumeSessionId =
-						existingSession.claudeSessionId ||
-						existingSession.geminiSessionId ||
-						existingSession.codexSessionId ||
-						existingSession.cursorSessionId;
+					const resumeInfo = this.getResumeInfo(existingSession);
 
-					if (resumeSessionId) {
+					if (resumeInfo) {
 						try {
 							await this.resumeSession(
 								event,
 								existingSession,
 								existingSessionId,
-								resumeSessionId,
+								resumeInfo.sessionId,
+								resumeInfo.runnerType,
 								taskInstructions,
 							);
 						} catch (error) {
@@ -264,20 +336,6 @@ export class ChatSessionHandler<TEvent> {
 				this.logger.info(
 					`Previous session ${existingSessionId} for thread ${threadKey} has no runner, creating new session`,
 				);
-			}
-
-			// No session exists for this thread. Only events explicitly allowed to
-			// start a session may do so — e.g. a Slack @mention. A plain follow-up
-			// message in an unbound thread must be ignored, otherwise every message
-			// in any channel Cyrus can see would spin up a session.
-			if (
-				!existingSessionId &&
-				this.adapter.isSessionInitiatingEvent?.(event) === false
-			) {
-				this.logger.info(
-					`Ignoring non-initiating ${this.adapter.platformName} event for unbound thread ${threadKey}`,
-				);
-				return;
 			}
 
 			// Create an empty workspace directory for this thread
@@ -329,7 +387,11 @@ export class ChatSessionHandler<TEvent> {
 				sessionId,
 			);
 
-			const runner = this.deps.createRunner(runnerConfig);
+			const runner = this.deps.createRunner(
+				runnerConfig,
+				(runnerConfig as AgentRunnerConfig & { runnerType?: RunnerType })
+					.runnerType,
+			);
 
 			// Store the runner in the session manager
 			this.sessionManager.addAgentRunner(sessionId, runner);
@@ -392,6 +454,23 @@ export class ChatSessionHandler<TEvent> {
 			);
 		} finally {
 			this.deps.onWebhookEnd();
+		}
+	}
+
+	/** Post a block notice, logging rather than failing the event if it cannot be posted */
+	private async notifyBlocked(event: TEvent, reply: string): Promise<void> {
+		if (!this.adapter.notifyBlocked) {
+			this.logger.warn(
+				`${this.adapter.platformName} adapter denied an event with a reply but cannot post it`,
+			);
+			return;
+		}
+		try {
+			await this.adapter.notifyBlocked(event, reply);
+		} catch (error) {
+			this.logger.warn(
+				`Failed to post ${this.adapter.platformName} block notice: ${error instanceof Error ? error.message : String(error)}`,
+			);
 		}
 	}
 
@@ -518,6 +597,7 @@ export class ChatSessionHandler<TEvent> {
 		existingSession: CyrusAgentSession,
 		sessionId: string,
 		resumeSessionId: string,
+		runnerType: RunnerType,
 		taskInstructions: string,
 	): Promise<void> {
 		const systemPrompt = this.adapter.buildSystemPrompt(event);
@@ -528,9 +608,10 @@ export class ChatSessionHandler<TEvent> {
 			systemPrompt,
 			sessionId,
 			resumeSessionId,
+			runnerType,
 		);
 
-		const runner = this.deps.createRunner(runnerConfig);
+		const runner = this.deps.createRunner(runnerConfig, runnerType);
 		this.sessionManager.addAgentRunner(sessionId, runner);
 
 		const resumePrompt = await this.withThreadCatchup(
@@ -561,6 +642,27 @@ export class ChatSessionHandler<TEvent> {
 				);
 				this.clearPendingReplies(sessionId);
 			});
+	}
+
+	private getResumeInfo(
+		session: CyrusAgentSession,
+	): { sessionId: string; runnerType: RunnerType } | undefined {
+		if (session.claudeSessionId) {
+			return { sessionId: session.claudeSessionId, runnerType: "claude" };
+		}
+		if (session.geminiSessionId) {
+			return { sessionId: session.geminiSessionId, runnerType: "gemini" };
+		}
+		if (session.codexSessionId) {
+			return { sessionId: session.codexSessionId, runnerType: "codex" };
+		}
+		if (session.cursorSessionId) {
+			return { sessionId: session.cursorSessionId, runnerType: "cursor" };
+		}
+		if (session.opencodeSessionId) {
+			return { sessionId: session.opencodeSessionId, runnerType: "opencode" };
+		}
+		return undefined;
 	}
 
 	/**
@@ -725,6 +827,7 @@ export class ChatSessionHandler<TEvent> {
 		systemPrompt: string,
 		sessionId: string,
 		resumeSessionId?: string,
+		runnerType?: RunnerType,
 	): Promise<AgentRunnerConfig> {
 		const sessionLogger = this.logger.withContext({
 			sessionId,
@@ -738,6 +841,10 @@ export class ChatSessionHandler<TEvent> {
 		const skillsConfig = this.deps.resolveSkillsConfig
 			? await this.deps.resolveSkillsConfig({ repository, repositoryPaths })
 			: {};
+		const linearWorkspaceId = provider.getDefaultLinearWorkspaceId();
+		if (linearWorkspaceId && this.deps.ensureLinearTokenFresh) {
+			await this.deps.ensureLinearTokenFresh(linearWorkspaceId);
+		}
 
 		return this.deps.runnerConfigBuilder.buildChatConfig({
 			workspacePath,
@@ -745,14 +852,18 @@ export class ChatSessionHandler<TEvent> {
 			systemPrompt,
 			sessionId,
 			resumeSessionId,
+			runnerType,
 			cyrusHome: this.deps.cyrusHome,
 			platformName: this.adapter.platformName,
-			linearWorkspaceId: provider.getDefaultLinearWorkspaceId(),
+			linearWorkspaceId,
 			repository,
 			repositoryPaths,
 			platformMcpConfigOverrides: this.deps.getPlatformMcpConfigOverrides?.(),
+			strictMcpConfig: this.deps.getStrictMcpConfig?.(),
 			plugins: skillsConfig.plugins,
 			skills: skillsConfig.skills,
+			opencodeGlobalConfig: this.deps.getOpenCodeGlobalConfig?.(),
+			opencodeGlobalStateScope: this.deps.getOpenCodeGlobalStateScope?.(),
 			logger: sessionLogger,
 			onMessage: (message: SDKMessage) =>
 				this.handleAgentMessage(sessionId, message),
