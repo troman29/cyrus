@@ -5,16 +5,38 @@ import { createLogger, type ILogger, ipMatchesAllowlist } from "cyrus-core";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { GitHubMessageTranslator } from "./GitHubMessageTranslator.js";
 import type {
+	GitHubCheckSuitePayload,
 	GitHubEventTransportConfig,
 	GitHubEventTransportEvents,
 	GitHubEventType,
 	GitHubIssueCommentPayload,
+	GitHubPullRequestPayload,
 	GitHubPullRequestReviewCommentPayload,
 	GitHubPullRequestReviewPayload,
 	GitHubPushPayload,
 	GitHubVerificationMode,
 	GitHubWebhookEvent,
 } from "./types.js";
+
+/** Accepted actions per event type; an empty list accepts every action. */
+const LEGACY_ACTIONS: Record<string, readonly string[]> = {
+	issue_comment: ["created"],
+	pull_request_review_comment: ["created"],
+	pull_request_review: ["submitted"],
+	push: [],
+};
+
+const SHEPHERD_ACTIONS: Record<string, readonly string[]> = {
+	...LEGACY_ACTIONS,
+	pull_request: [
+		"opened",
+		"reopened",
+		"ready_for_review",
+		"synchronize",
+		"closed",
+	],
+	check_suite: ["completed"],
+};
 
 export declare interface GitHubEventTransport {
 	on<K extends keyof GitHubEventTransportEvents>(
@@ -177,7 +199,7 @@ export class GitHubEventTransport extends EventEmitter {
 				return;
 			}
 
-			this.processAndEmitEvent(request, reply);
+			await this.processAndEmitEvent(request, reply);
 		} catch (error) {
 			const err = new Error("Signature verification failed");
 			if (error instanceof Error) {
@@ -209,7 +231,7 @@ export class GitHubEventTransport extends EventEmitter {
 		}
 
 		try {
-			this.processAndEmitEvent(request, reply);
+			await this.processAndEmitEvent(request, reply);
 		} catch (error) {
 			const err = new Error("Proxy webhook processing failed");
 			if (error instanceof Error) {
@@ -223,30 +245,20 @@ export class GitHubEventTransport extends EventEmitter {
 	/**
 	 * Process the webhook request and emit the appropriate event
 	 */
-	private processAndEmitEvent(
+	private async processAndEmitEvent(
 		request: FastifyRequest,
 		reply: FastifyReply,
-	): void {
+	): Promise<void> {
 		const eventType = request.headers["x-github-event"] as string;
 		const deliveryId =
 			(request.headers["x-github-delivery"] as string) || "unknown";
 		const installationToken = request.headers["x-github-installation-token"] as
 			| string
 			| undefined;
+		const eventHandler = this.config.eventHandler;
 
 		if (!eventType) {
 			reply.code(400).send({ error: "Missing x-github-event header" });
-			return;
-		}
-
-		if (
-			eventType !== "issue_comment" &&
-			eventType !== "pull_request_review_comment" &&
-			eventType !== "pull_request_review" &&
-			eventType !== "push"
-		) {
-			this.logger.debug(`Ignoring unsupported event type: ${eventType}`);
-			reply.code(200).send({ success: true, ignored: true });
 			return;
 		}
 
@@ -254,24 +266,31 @@ export class GitHubEventTransport extends EventEmitter {
 			| GitHubIssueCommentPayload
 			| GitHubPullRequestReviewCommentPayload
 			| GitHubPullRequestReviewPayload
-			| GitHubPushPayload;
+			| GitHubPushPayload
+			| GitHubPullRequestPayload
+			| GitHubCheckSuitePayload;
+		const repoName =
+			(payload as { repository?: { full_name?: string } } | null)?.repository
+				?.full_name ?? "unknown";
+
+		const allowedActions = eventHandler
+			? SHEPHERD_ACTIONS[eventType]
+			: LEGACY_ACTIONS[eventType];
+		if (!allowedActions) {
+			this.logIgnored(
+				eventHandler,
+				`reason=unsupported_event evt=${eventType} delivery=${deliveryId} repo=${repoName}`,
+			);
+			reply.code(200).send({ success: true, ignored: true });
+			return;
+		}
 
 		// Push events don't have an action field — always emit them
-		if (eventType === "push") {
-			// No action filtering needed for push events
-		} else if (eventType === "pull_request_review") {
-			// For pull_request_review, handle 'submitted' action (not 'created')
-			if ((payload as GitHubPullRequestReviewPayload).action !== "submitted") {
-				this.logger.debug(
-					`Ignoring ${eventType} with action: ${(payload as GitHubPullRequestReviewPayload).action}`,
-				);
-				reply.code(200).send({ success: true, ignored: true });
-				return;
-			}
-		} else if ((payload as GitHubIssueCommentPayload).action !== "created") {
-			// For issue_comment and pull_request_review_comment, only handle 'created'
-			this.logger.debug(
-				`Ignoring ${eventType} with action: ${(payload as GitHubIssueCommentPayload).action}`,
+		const action = (payload as { action?: string }).action;
+		if (allowedActions.length > 0 && !allowedActions.includes(action ?? "")) {
+			this.logIgnored(
+				eventHandler,
+				`reason=unsupported_action evt=${eventType}/${action} delivery=${deliveryId} repo=${repoName}`,
 			);
 			reply.code(200).send({ success: true, ignored: true });
 			return;
@@ -286,6 +305,24 @@ export class GitHubEventTransport extends EventEmitter {
 
 		this.logger.info(`Received ${eventType} webhook (delivery: ${deliveryId})`);
 
+		if (eventHandler) {
+			let acknowledged = false;
+			try {
+				acknowledged = await eventHandler(webhookEvent);
+			} catch (error) {
+				this.logger.error(
+					"Event handler failed",
+					error instanceof Error ? error : new Error(String(error)),
+				);
+			}
+			if (acknowledged) {
+				reply.code(200).send({ success: true });
+			} else {
+				reply.code(503).send({ error: "Event handler unavailable" });
+			}
+			return;
+		}
+
 		// Emit "event" for legacy compatibility
 		this.emit("event", webhookEvent);
 
@@ -293,6 +330,14 @@ export class GitHubEventTransport extends EventEmitter {
 		this.emitMessage(webhookEvent);
 
 		reply.code(200).send({ success: true });
+	}
+
+	private logIgnored(shepherdMode: unknown, details: string): void {
+		if (shepherdMode) {
+			this.logger.info(`shepherd: dropped ${details}`);
+		} else {
+			this.logger.debug(`Ignoring webhook: ${details}`);
+		}
 	}
 
 	/**

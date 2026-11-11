@@ -4,6 +4,9 @@ This changelog documents internal development changes, refactors, tooling update
 
 ## [Unreleased]
 
+### Added
+- PR shepherd: with `SHEPHERD_ENABLED=1` the GitHub transport also accepts `pull_request` and `check_suite`, forwards normalized PR events to the hub over `shepherd.sock` and answers 200 only after the hub ACK (503 otherwise); the legacy GitHub session path is skipped. See `docs/PR_SHEPHERD.md`.
+
 ## [0.2.68] - 2026-08-05
 
 ### Added
