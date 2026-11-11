@@ -6,6 +6,7 @@ This changelog documents internal development changes, refactors, tooling update
 
 ### Added
 - PR shepherd: with `SHEPHERD_ENABLED=1` the GitHub transport also accepts `pull_request` and `check_suite`, forwards normalized PR events to the hub over `shepherd.sock` and answers 200 only after the hub ACK (503 otherwise); the legacy GitHub session path is skipped. See `docs/PR_SHEPHERD.md`.
+- PR shepherd fan-out: `SHEPHERD_HUBS` (`name=unix:/path|http(s)://host:port`, primary = `primary` or first) and `SHEPHERD_HUB_TOKEN` send each event to all hubs in parallel; 200 only when every hub answered ok, `pr-unowned` goes to the primary when no hub owns the PR, a `disabled` reply counts as "not mine". `SHEPHERD_ACCOUNTS` drops events of other repo owners (`account_not_allowed`). Without `SHEPHERD_HUBS` the single `SHEPHERD_SOCKET` behaves as before.
 
 ## [0.2.76] - 2026-11-06
 
