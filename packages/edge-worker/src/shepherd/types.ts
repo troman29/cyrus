@@ -73,10 +73,21 @@ export type PrLookup = (
 	installationToken?: string,
 ) => Promise<PrMeta>;
 
+export type HubTarget = {
+	name: string;
+	/** Primary hub: must answer ok for a 200, receives `pr-unowned`. */
+	primary: boolean;
+} & ({ kind: "unix"; socketPath: string } | { kind: "http"; baseUrl: string });
+
 export interface ShepherdConfig {
-	socketPath: string;
+	/** Every hub receives every event; exactly one is primary. */
+	hubs: readonly HubTarget[];
+	/** Bearer token for http hubs. */
+	hubToken?: string;
 	/** Lower-cased PR author logins we shepherd. */
 	authors: ReadonlySet<string>;
 	/** Repo globs (`owner/name`, `owner/*`); undefined allows every repo. */
 	repos?: readonly RegExp[];
+	/** Lower-cased repo owners we serve; undefined allows every owner. */
+	accounts?: ReadonlySet<string>;
 }

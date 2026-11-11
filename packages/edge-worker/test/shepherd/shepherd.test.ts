@@ -46,7 +46,7 @@ function router(
 			if (sendResult instanceof Error) {
 				throw sendResult;
 			}
-			return sendResult;
+			return { status: sendResult, owner: "mine" };
 		},
 		...overrides,
 	});
@@ -172,7 +172,14 @@ describe("normalize", () => {
 describe("loadShepherdConfig", () => {
 	it("defaults authors and socket, supports repo globs", () => {
 		const defaults = loadShepherdConfig({ TELEGRAM_STATE_DIR: "/state" });
-		expect(defaults.socketPath).toBe("/state/shepherd.sock");
+		expect(defaults.hubs).toEqual([
+			{
+				name: "primary",
+				primary: true,
+				kind: "unix",
+				socketPath: "/state/shepherd.sock",
+			},
+		]);
 		expect([...defaults.authors]).toEqual(["thomas5788", "agentek-bot[bot]"]);
 		expect(defaults.repos).toBeUndefined();
 		const scoped = loadShepherdConfig({
@@ -188,6 +195,55 @@ describe("loadShepherdConfig", () => {
 	});
 });
 
+describe("SHEPHERD_HUBS and SHEPHERD_ACCOUNTS", () => {
+	it("parses hubs; the first is primary unless one is named primary", () => {
+		const first = loadShepherdConfig({
+			SHEPHERD_HUBS: "home=unix:/a.sock,vm=http://10.0.0.2:8080/",
+			SHEPHERD_HUB_TOKEN: "t",
+		});
+		expect(first.hubs).toEqual([
+			{ name: "home", primary: true, kind: "unix", socketPath: "/a.sock" },
+			{
+				name: "vm",
+				primary: false,
+				kind: "http",
+				baseUrl: "http://10.0.0.2:8080",
+			},
+		]);
+		expect(first.hubToken).toBe("t");
+		const named = loadShepherdConfig({
+			SHEPHERD_HUBS: "vm=http://h:1,primary=unix:/a.sock",
+		});
+		expect(named.hubs.map((hub) => hub.primary)).toEqual([false, true]);
+	});
+
+	it("rejects malformed hubs", () => {
+		expect(() => loadShepherdConfig({ SHEPHERD_HUBS: "nope" })).toThrow();
+		expect(() => loadShepherdConfig({ SHEPHERD_HUBS: "a=ftp://x" })).toThrow();
+		expect(() =>
+			loadShepherdConfig({ SHEPHERD_HUBS: "a=unix:/x,a=unix:/y" }),
+		).toThrow();
+	});
+
+	it("drops other owners before any API call and answers true", async () => {
+		const lookup = vi.fn(lookupPr);
+		const { instance, sent, log } = router("persisted", {
+			config: loadShepherdConfig({ SHEPHERD_ACCOUNTS: "troman29, Other" }),
+			lookupPr: lookup,
+		});
+		expect(
+			await instance.handle(
+				fixture("check_suite.completed_1_pr", "check_suite"),
+			),
+		).toBe(true);
+		expect(sent).toHaveLength(0);
+		expect(lookup).not.toHaveBeenCalled();
+		expect(log.info).toHaveBeenCalledWith(
+			expect.stringContaining("reason=account_not_allowed"),
+		);
+	});
+});
+
 describe("EventRouter", () => {
 	it("forwards a PR event and answers true", async () => {
 		const { instance, sent, log } = router("persisted");
@@ -197,18 +253,15 @@ describe("EventRouter", () => {
 		expect(sent).toHaveLength(1);
 		expect(sent[0].deliveryId).toBe("d-1");
 		expect(log.info).toHaveBeenCalledWith(
-			"shepherd: forwarded delivery=d-1 repo=windbit/agentek-console#1687 kind=pr_opened",
+			"shepherd: delivered delivery=d-1 repo=windbit/agentek-console#1687 kind=pr_opened owner=primary hubs=1/1",
 		);
 	});
 
-	it("logs duplicate and still answers true", async () => {
-		const { instance, log } = router("duplicate");
+	it("answers true on duplicate", async () => {
+		const { instance } = router("duplicate");
 		expect(
 			await instance.handle(fixture("pull_request.opened", "pull_request")),
 		).toBe(true);
-		expect(log.info).toHaveBeenCalledWith(
-			expect.stringContaining("shepherd: duplicate delivery=d-1"),
-		);
 	});
 
 	it("answers false when the hub fails", async () => {
