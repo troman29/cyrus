@@ -1,15 +1,18 @@
 import { createLogger, type ILogger } from "cyrus-core";
 import type { GitHubWebhookEvent } from "cyrus-github-event-transport";
 import { eventDropReason, rawDropReason } from "./filter.js";
-import { type HubAck, sendToHub } from "./hubClient.js";
+import {
+	type HubAck,
+	type PrEventRequest,
+	type PrUnownedRequest,
+	sendToHub,
+	sendUnowned,
+} from "./hubClient.js";
 import { normalize } from "./normalize.js";
 import type { PrLookup, ShepherdConfig, ShepherdEvent } from "./types.js";
 
-export type HubSender = (request: {
-	socketPath: string;
-	deliveryId: string;
-	event: ShepherdEvent;
-}) => Promise<HubAck>;
+export type HubSender = (request: PrEventRequest) => Promise<HubAck>;
+export type UnownedSender = (request: PrUnownedRequest) => Promise<void>;
 
 export interface EventRouterOptions {
 	config: ShepherdConfig;
@@ -17,18 +20,21 @@ export interface EventRouterOptions {
 	logger?: ILogger;
 	/** Overridable for tests. */
 	sendToHub?: HubSender;
+	sendUnowned?: UnownedSender;
 }
 
 /**
- * Filters, normalizes and forwards GitHub events to the hub. Never starts a
+ * Filters, normalizes and fans GitHub events out to every hub. Never starts a
  * Cyrus session. handle() resolves true when the transport may answer 200
- * (everything forwarded or deliberately dropped), false for 503.
+ * (every hub answered ok for everything, or the event was deliberately
+ * dropped), false for 503.
  */
 export class EventRouter {
 	private readonly config: ShepherdConfig;
 	private readonly lookupPr: PrLookup;
 	private readonly logger: ILogger;
 	private readonly send: HubSender;
+	private readonly sendUnowned: UnownedSender;
 
 	constructor(options: EventRouterOptions) {
 		this.config = options.config;
@@ -36,6 +42,7 @@ export class EventRouter {
 		this.logger =
 			options.logger ?? createLogger({ component: "ShepherdEventRouter" });
 		this.send = options.sendToHub ?? sendToHub;
+		this.sendUnowned = options.sendUnowned ?? sendUnowned;
 	}
 
 	async handle(webhook: GitHubWebhookEvent): Promise<boolean> {
@@ -76,25 +83,81 @@ export class EventRouter {
 			// Hub dedups by deliveryId, so PRs sharing one suite delivery need distinct ids.
 			const hubDeliveryId =
 				events.length > 1 ? `${deliveryId}#${event.pr}` : deliveryId;
-			try {
-				const ack = await this.send({
-					socketPath: this.config.socketPath,
-					deliveryId: hubDeliveryId,
-					event,
-				});
-				const outcome = ack === "duplicate" ? "duplicate" : "forwarded";
-				this.logger.info(
-					`shepherd: ${outcome} delivery=${deliveryId} repo=${where} kind=${event.kind}`,
-				);
-			} catch (error) {
+			if (!(await this.deliver(hubDeliveryId, deliveryId, event))) {
 				allAcknowledged = false;
-				this.logger.error(
-					`shepherd: failed delivery=${deliveryId} repo=${where} kind=${event.kind}`,
-					error instanceof Error ? error : new Error(String(error)),
-				);
 			}
 		}
 		return allAcknowledged;
+	}
+
+	/** Sends one event to all hubs in parallel; true when every hub answered ok. */
+	private async deliver(
+		hubDeliveryId: string,
+		deliveryId: string,
+		event: ShepherdEvent,
+	): Promise<boolean> {
+		const { hubs, hubToken: token } = this.config;
+		const where = `${event.repo}#${event.pr}`;
+		const results = await Promise.all(
+			hubs.map((hub) =>
+				this.send({ hub, token, deliveryId: hubDeliveryId, event }).then(
+					(ack) => ({ hub, ack }),
+					(error: unknown) => ({
+						hub,
+						error: error instanceof Error ? error : new Error(String(error)),
+					}),
+				),
+			),
+		);
+		const failed: string[] = [];
+		let firstError: Error | undefined;
+		let owner = "none";
+		for (const result of results) {
+			if ("error" in result) {
+				failed.push(result.hub.name);
+				firstError ??= result.error;
+			} else if (result.ack.owner === "mine" && owner === "none") {
+				owner = result.hub.name;
+			}
+		}
+		const counts = `hubs=${hubs.length - failed.length}/${hubs.length}`;
+		if (failed.length > 0) {
+			this.logger.error(
+				`shepherd: failed delivery=${deliveryId} repo=${where} kind=${event.kind} ${counts} failed=${failed.join(",")}`,
+				firstError,
+			);
+			return false;
+		}
+		if (owner === "none") {
+			await this.reportUnowned(hubDeliveryId, deliveryId, where);
+		}
+		this.logger.info(
+			`shepherd: delivered delivery=${deliveryId} repo=${where} kind=${event.kind} owner=${owner} ${counts}`,
+		);
+		return true;
+	}
+
+	/** Best effort: the primary hub falls back on its own timer if this fails. */
+	private async reportUnowned(
+		hubDeliveryId: string,
+		deliveryId: string,
+		where: string,
+	): Promise<void> {
+		const primary = this.config.hubs.find((hub) => hub.primary);
+		if (!primary) {
+			return;
+		}
+		try {
+			await this.sendUnowned({
+				hub: primary,
+				token: this.config.hubToken,
+				deliveryId: hubDeliveryId,
+			});
+		} catch (error) {
+			this.logger.warn(
+				`shepherd: pr-unowned failed delivery=${deliveryId} repo=${where}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
 	}
 
 	private logDropped(
